@@ -36,7 +36,7 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
-
+#include "commander.h"
 #define DEBUG_MODULE "APP"
 #include "debug.h"
 #include "log.h"
@@ -60,6 +60,15 @@ typedef struct
   int16_t acc_z;
   uint64_t timestamp;
 } __attribute__((packed)) imu_data_t;
+
+typedef struct
+{
+  uint8_t magic;
+  int16_t vel_x;
+  int16_t vel_y;
+  int16_t vel_z;
+  int16_t yaw_rate;
+} __attribute__((packed)) velocity_setpoint_t;
 
 void getIMUData(imu_data_t *data, logVarId_t idGyroX, logVarId_t idGyroY, logVarId_t idGyroZ, logVarId_t idAccX, logVarId_t idAccY, logVarId_t idAccZ)
 {
@@ -101,6 +110,29 @@ void createIMUPacket(CPXPacket_t *packet, imu_data_t *data)
   packet->dataLength = sizeof(imu_data_t);
 }
 
+static float vel_x = 0;
+static float vel_y = 0;
+static float vel_z = 0;
+static float yaw_rate = 0;
+static setpoint_t setpoint;
+static uint8_t positioningInit = 0;
+
+static void setHoverSetpoint(setpoint_t *setpoint, float vx, float vy, float z, float yawrate)
+{
+  setpoint->mode.z = modeAbs;
+  setpoint->position.z = z;
+
+  setpoint->mode.yaw = modeVelocity;
+  setpoint->attitudeRate.yaw = yawrate;
+
+  setpoint->mode.x = modeVelocity;
+  setpoint->mode.y = modeVelocity;
+  setpoint->velocity.x = vx;
+  setpoint->velocity.y = vy;
+
+  setpoint->velocity_body = true;
+}
+
 void appMain()
 {
   DEBUG_PRINT("Hello! I am the stm_gap8_cpx app\n");
@@ -111,6 +143,7 @@ void appMain()
   logVarId_t idAccX = logGetVarId("acc", "x");
   logVarId_t idAccY = logGetVarId("acc", "y");
   logVarId_t idAccZ = logGetVarId("acc", "z");
+  paramVarId_t idPositioningDeck = paramGetVarId("deck", "bcFlow2");
 
   imu_data_t data;
 
@@ -126,6 +159,8 @@ void appMain()
   while (1)
   {
     // vTaskDelay(M2T(10));
+
+    positioningInit = paramGetUint(idPositioningDeck);
 
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
@@ -143,6 +178,26 @@ static void cpxPacketCallback(const CPXPacket_t *cpxRx)
 {
   // DEBUG_PRINT("Got packet from GAP8 (%u)\n", cpxRx->data[0]);
 
+  velocity_setpoint_t *velocity_data = (velocity_setpoint_t *)cpxRx->data;
+
+  vel_x = velocity_data->vel_x / 1000.0;
+  vel_y = velocity_data->vel_y / 1000.0;
+  vel_z = velocity_data->vel_z / 1000.0;
+  yaw_rate = velocity_data->yaw_rate / 500.0;
+
+  DEBUG_PRINT("vel_x: %f \n", (double)vel_x);
+  DEBUG_PRINT("vel_y: %f \n", (double)vel_y);
+  DEBUG_PRINT("z: %f \n", (double)vel_z);
+  DEBUG_PRINT("yaw_rate: %f \n", (double)yaw_rate);
+  DEBUG_PRINT("positioningInit: %f \n", (double)positioningInit);
+
+  setHoverSetpoint(&setpoint, vel_x, vel_y, vel_z, yaw_rate);
+
+  if (positioningInit)
+  {
+    commanderSetSetpoint(&setpoint, 3);
+  }
+  /*
   imu_data_t *imu_pack = (imu_data_t *)cpxRx->data;
 
   DEBUG_PRINT("Got packet gyro_x is now: %f raw\n", (double)imu_pack->gyro_x);
@@ -157,5 +212,5 @@ static void cpxPacketCallback(const CPXPacket_t *cpxRx)
 
   DEBUG_PRINT("Got packet acc_z is now: %f raw\n", (double)imu_pack->acc_z);
 
-  DEBUG_PRINT("Got packet timestamp is now: %lld\n", imu_pack->timestamp);
+  DEBUG_PRINT("Got packet timestamp is now: %lld\n", imu_pack->timestamp);*/
 }
